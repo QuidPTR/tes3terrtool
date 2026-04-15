@@ -1,6 +1,29 @@
 use clap::Parser;
 use tes3::esp::{Plugin, Landscape};
-use image::{RgbImage, Rgb};
+
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    ///What to do -- can be export or import
+    #[arg(required = true)]
+    command: String,
+
+    ///Path to input ESM/ESP
+    #[arg(short, long)]
+    input_esm: String,
+
+    ///Path to output ESM/ESP, if importing
+    #[arg(short, long)]
+    output_esm: String,
+
+    ///Path to image file
+    #[arg(long)]
+    image: String,
+}
+
+
+const PPC : u32 = 65u32; // Pixels per cell
 
 
 struct Extents {
@@ -40,30 +63,9 @@ fn calc_plugin_extents(plugin: &Plugin) -> Extents {
 }
 
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    ///What to do -- can be export or import
-    #[arg(required = true)]
-    command: String,
-
-    ///Path to ESM/ESP
-    #[arg(short, long)]
-    esm: String,
-
-    ///Path to image file
-    #[arg(short, long)]
-    image: String,
-}
-
-
-const PPC : u32 = 65u32; // Pixels per cell
-
-
 fn export(args: &Args) -> std::io::Result<()> {
 
-    let plugin = Plugin::from_path(&args.esm)?;
-
+    let plugin = Plugin::from_path(&args.input_esm)?;
     let e = calc_plugin_extents(&plugin);
     let ncells_x:u32 = (e.max_x - e.min_x + 1) as u32;
     let ncells_y:u32 = (e.max_y - e.min_y + 1) as u32;
@@ -73,7 +75,7 @@ fn export(args: &Args) -> std::io::Result<()> {
     println!("converting {} x {} cells into a {} x {} image", ncells_x, ncells_y, img_w, img_h);
 
     // Create image
-    let mut im = RgbImage::new(img_w, img_h);
+    let mut im = image::RgbImage::new(img_w, img_h);
 
     // Dump colors
     for object in plugin.objects_of_type::<Landscape>() {
@@ -85,7 +87,7 @@ fn export(args: &Args) -> std::io::Result<()> {
                 let (r, g, b) = (data[j][i][0], data[j][i][1], data[j][i][2]);
                 let pixel_x = ((grid_x - e.min_x) as u32) * PPC + (i as u32);
                 let pixel_y = ((grid_y - e.min_y) as u32) * PPC + (j as u32);
-                im.put_pixel(pixel_x, (img_h - 1) - pixel_y, Rgb([r, g, b]));
+                im.put_pixel(pixel_x, (img_h - 1) - pixel_y, image::Rgb([r, g, b]));
             }
         }
     }
@@ -99,6 +101,37 @@ fn export(args: &Args) -> std::io::Result<()> {
 
 fn import(args: &Args) -> std::io::Result<()> {
 
+    let mut plugin = Plugin::from_path(&args.input_esm)?;
+    let e = calc_plugin_extents(&plugin);
+    let ncells_x:u32 = (e.max_x - e.min_x + 1) as u32;
+    let ncells_y:u32 = (e.max_y - e.min_y + 1) as u32;
+
+    let im = image::open(&args.image).unwrap().into_rgb8();
+    let (img_w, img_h) = im.dimensions();
+
+    assert!(img_w == ncells_x * PPC);
+    assert!(img_h == ncells_y * PPC);
+
+    // Read colors
+    for object in plugin.objects_of_type::<Landscape>() {
+        let (grid_x, grid_y) = object.grid;
+
+        // XXX I'd really like to write into object.vertex_colors.data[][][]
+
+        //for j in 0..(PPC as usize) {
+        //    for i in 0..(PPC as usize) {
+        //        let pixel_x = ((grid_x - e.min_x) as u32) * PPC + (i as u32);
+        //        let pixel_y = ((grid_y - e.min_y) as u32) * PPC + (j as u32);
+        //        im.put_pixel(pixel_x, (img_h - 1) - pixel_y, image::Rgb([r, g, b]));
+
+        //        let (r, g, b) = (data[j][i][0], data[j][i][1], data[j][i][2]);
+        //    }
+        //}
+    }
+
+    // Save the ESM/ESP
+    plugin.save_path(&args.output_esm)?;
+
     Ok(())
 }
 
@@ -110,7 +143,7 @@ fn main() -> std::io::Result<()> {
         "export" => export(&args),
         "import" => import(&args),
         _ => panic!(),
-    };
+    }?;
 
     Ok(())
 }
