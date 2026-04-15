@@ -3,55 +3,77 @@ use tes3::esp::{Plugin, Landscape};
 use image::{RgbImage, Rgb};
 
 
+struct Extents {
+    pub min_x : i32,
+    pub max_x : i32,
+    pub min_y : i32,
+    pub max_y : i32,
+}
+
+
+fn calc_plugin_extents(plugin: &Plugin) -> Extents {
+    const MAX : i32 = 0x7fffffffi32;
+    const MIN : i32 = -0x7fffffffi32;
+
+    let mut e = Extents { min_x: MAX, max_x: MIN, min_y: MAX, max_y: MIN };
+
+    for object in plugin.objects_of_type::<Landscape>() {
+        let (x, y) = object.grid; // (i32, i32)
+        if x < e.min_x {
+            e.min_x = x;
+        }
+        if x > e.max_x {
+            e.max_x = x;
+        }
+        if y < e.min_y {
+            e.min_y = y;
+        }
+        if y > e.max_y {
+            e.max_y = y;
+        }
+    }
+
+    assert!(e.max_x >= e.min_x);
+    assert!(e.max_y >= e.min_y);
+
+    e
+}
+
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    ///Path to ESM/ESP file
+    ///What to do -- can be export or import
+    #[arg(required = true)]
+    command: String,
+
+    ///Path to ESM/ESP
     #[arg(short, long)]
     esm: String,
 
-    ///Path to BMP file
+    ///Path to image file
     #[arg(short, long)]
     image: String,
 }
 
 
-fn main() -> std::io::Result<()> {
-    let args = Args::parse();
+const PPC : u32 = 65u32; // Pixels per cell
 
-    let plugin = Plugin::from_path(args.esm)?;
 
-    const PPC : u32 = 65u32; // Pixels per cell
+fn export(args: &Args) -> std::io::Result<()> {
 
-    // Figure out extents of the ESM 
-    let (mut min_x, mut max_x) = (0x7fffffff, -0x7fffffff);
-    let (mut min_y, mut max_y) = (0x7fffffff, -0x7fffffff);
-    for object in plugin.objects_of_type::<Landscape>() {
-        let (x, y) = object.grid;
-        if x < min_x {
-            min_x = x;
-        }
-        if x > max_x {
-            max_x = x;
-        }
-        if y < min_y {
-            min_y = y;
-        }
-        if y > max_y {
-            max_y = y;
-        }
-    }
-    assert!(max_x >= min_x);
-    assert!(max_y >= min_y);
+    let plugin = Plugin::from_path(&args.esm)?;
 
-    let dx:u32 = (max_x - min_x + 1) as u32;
-    let dy:u32 = (max_y - min_y + 1) as u32;
+    let e = calc_plugin_extents(&plugin);
+    let ncells_x:u32 = (e.max_x - e.min_x + 1) as u32;
+    let ncells_y:u32 = (e.max_y - e.min_y + 1) as u32;
 
-    // Create an image
-    let (img_w, img_h) = (dx * PPC, dy * PPC);
-    println!("converting {} x {} cells into a {} x {} image", dx, dy, img_w, img_h);
+    let (img_w, img_h) = (ncells_x * PPC, ncells_y * PPC);
 
-    let mut im = image::RgbImage::new(img_w, img_h);
+    println!("converting {} x {} cells into a {} x {} image", ncells_x, ncells_y, img_w, img_h);
+
+    // Create image
+    let mut im = RgbImage::new(img_w, img_h);
 
     // Dump colors
     for object in plugin.objects_of_type::<Landscape>() {
@@ -61,15 +83,34 @@ fn main() -> std::io::Result<()> {
         for j in 0..(PPC as usize) {
             for i in 0..(PPC as usize) {
                 let (r, g, b) = (data[j][i][0], data[j][i][1], data[j][i][2]);
-                let pixel_x = ((grid_x - min_x) as u32) * PPC + (i as u32);
-                let pixel_y = ((grid_y - min_y) as u32) * PPC + (j as u32);
+                let pixel_x = ((grid_x - e.min_x) as u32) * PPC + (i as u32);
+                let pixel_y = ((grid_y - e.min_y) as u32) * PPC + (j as u32);
                 im.put_pixel(pixel_x, (img_h - 1) - pixel_y, Rgb([r, g, b]));
             }
         }
     }
 
     // Save the image
-    im.save(args.image).unwrap();
+    im.save(&args.image).unwrap();
+
+    Ok(())
+}
+
+
+fn import(args: &Args) -> std::io::Result<()> {
+
+    Ok(())
+}
+
+
+fn main() -> std::io::Result<()> {
+
+    let args = Args::parse();
+    match args.command.as_str() {
+        "export" => export(&args),
+        "import" => import(&args),
+        _ => panic!(),
+    };
 
     Ok(())
 }
