@@ -113,20 +113,20 @@ fn import(args: &Args) -> std::io::Result<()> {
     assert!(img_h == ncells_y * PPC);
 
     // Read colors
-    for object in plugin.objects_of_type::<Landscape>() {
+    for object in plugin.objects_of_type_mut::<Landscape>() {
         let (grid_x, grid_y) = object.grid;
+        let data = &mut object.vertex_colors.data;
 
-        // XXX I'd really like to write into object.vertex_colors.data[][][]
-
-        //for j in 0..(PPC as usize) {
-        //    for i in 0..(PPC as usize) {
-        //        let pixel_x = ((grid_x - e.min_x) as u32) * PPC + (i as u32);
-        //        let pixel_y = ((grid_y - e.min_y) as u32) * PPC + (j as u32);
-        //        im.put_pixel(pixel_x, (img_h - 1) - pixel_y, image::Rgb([r, g, b]));
-
-        //        let (r, g, b) = (data[j][i][0], data[j][i][1], data[j][i][2]);
-        //    }
-        //}
+        for j in 0..(PPC as usize) {
+            for i in 0..(PPC as usize) {
+                let pixel_x = ((grid_x - e.min_x) as u32) * PPC + (i as u32);
+                let pixel_y = ((grid_y - e.min_y) as u32) * PPC + (j as u32);
+                let pixel = im.get_pixel(pixel_x, (img_h - 1) - pixel_y);
+                data[j][i][0] = pixel[0];
+                data[j][i][1] = pixel[1];
+                data[j][i][2] = pixel[2];
+            }
+        }
     }
 
     // Save the ESM/ESP
