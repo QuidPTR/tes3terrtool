@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use image::{Rgb, RgbImage};
-use tes3::esp::{Plugin, Landscape};
+use tes3::esp::{Plugin, Landscape, LandscapeFlags};
 
 
 struct Extents {
@@ -52,12 +52,22 @@ fn export(input_esm: &String, output_image: &String) -> std::io::Result<()> {
 
     println!("Extracting {}x{} cells to a {}x{} image", ncells_x, ncells_y, img_w, img_h);
 
+    // Fill in with white, useful during import
+    im.fill(0xFF);
+
     // Dump colors
     for object in plugin.objects_of_type::<Landscape>() {
         let (cell_x, cell_y) = object.grid;
         let data = &object.vertex_colors.data;
 
-        // NOTE: skips the first row/column, they are duplicates of the second ones
+        if !(object.landscape_flags.intersects(LandscapeFlags::USES_VERTEX_COLORS)) {
+            // No vertex color to process
+            continue;
+        }
+
+        println!("Processing cell ({cell_x}, {cell_y})");
+
+        // NOTE: skips the first row/column, they cannot be edited independently
         for texel_y in 1..65 {
             for texel_x in 1..65 {
                 let (r, g, b) = (
@@ -99,15 +109,54 @@ fn import(input_esm: &String, input_image: &String, output_esm: &String) -> std:
         let (cell_x, cell_y) = object.grid;
         let data = &mut object.vertex_colors.data;
 
-        // NOTE: doesn't write the first row/column, they are not used by the engine (?)
+        // TODO: if all white (including borders), don't import
+
+        // Ensure the game knows this cell now has vertex colors
+        object.landscape_flags |= LandscapeFlags::USES_VERTEX_COLORS;
+
+        println!("Processing cell ({cell_x}, {cell_y})");
+
+        // Take the first pixel from the last pixel of the cell above to the left
+        let mut pixel = Rgb([0xFFu8, 0xFFu8, 0xFFu8]);
+        if ((cell_x - 1) - e.min_x) > 0 && ((cell_y - 1) - e.min_y) > 0 {
+            // There is a cell above to the left
+            let pixel_x = (((cell_x - 1) - e.min_x) as u32) * 64 + 63;
+            let pixel_y = (((cell_y - 1) - e.min_y) as u32) * 64 + 63;
+            pixel = *im.get_pixel(pixel_x, (img_h - 1) - pixel_y);
+        }
+        data[0][0] = [pixel[0], pixel[1], pixel[2]];
+
+        // Take the first column from the last column of the cell to the left
+        for texel_y in 1..65 {
+            let mut pixel = Rgb([0xFFu8, 0xFFu8, 0xFFu8]);
+            let pixel_y = ((cell_y - e.min_y) as u32) * 64 + ((texel_y - 1) as u32);
+            if ((cell_x - 1) - e.min_x) > 0 {
+                // There is a cell to the left
+                let pixel_x = (((cell_x - 1) - e.min_x) as u32) * 64 + 63;
+                pixel = *im.get_pixel(pixel_x, (img_h - 1) - pixel_y);
+            }
+            data[texel_y][0] = [pixel[0], pixel[1], pixel[2]];
+        }
+
+        // Take the first row from the last row of the cell above
+        for texel_x in 1..65 {
+            let mut pixel = Rgb([0xFFu8, 0xFFu8, 0xFFu8]);
+            let pixel_x = ((cell_x - e.min_x) as u32) * 64 + ((texel_x - 1) as u32);
+            if ((cell_y - 1) - e.min_y) > 0 {
+                // There is a cell above
+                let pixel_y = (((cell_y - 1) - e.min_y) as u32) * 64 + 63;
+                pixel = *im.get_pixel(pixel_x, (img_h - 1) - pixel_y);
+            }
+            data[0][texel_x] = [pixel[0], pixel[1], pixel[2]];
+        }
+
+        // Copy the rest of the cell
         for texel_y in 1..65 {
             for texel_x in 1..65 {
                 let pixel_x = ((cell_x - e.min_x) as u32) * 64 + ((texel_x - 1) as u32);
                 let pixel_y = ((cell_y - e.min_y) as u32) * 64 + ((texel_y - 1) as u32);
                 let pixel = im.get_pixel(pixel_x, (img_h - 1) - pixel_y);
-                data[texel_y][texel_x][0] = pixel[0];
-                data[texel_y][texel_x][1] = pixel[1];
-                data[texel_y][texel_x][2] = pixel[2];
+                data[texel_y][texel_x] = [pixel[0], pixel[1], pixel[2]];
             }
         }
     }
