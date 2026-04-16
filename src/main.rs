@@ -3,9 +3,6 @@ use image::{Rgb, RgbImage};
 use tes3::esp::{Plugin, Landscape};
 
 
-const PPC : u32 = 65u32; // Pixels per cell
-
-
 struct Extents {
     pub min_x: i32,
     pub max_x: i32,
@@ -50,23 +47,26 @@ fn export(input_esm: &String, output_image: &String) -> std::io::Result<()> {
     let ncells_x: u32 = (e.max_x - e.min_x + 1) as u32;
     let ncells_y: u32 = (e.max_y - e.min_y + 1) as u32;
 
-    let (img_w, img_h) = (ncells_x * PPC, ncells_y * PPC);
-
-    println!("converting {} x {} cells into a {} x {} image", ncells_x, ncells_y, img_w, img_h);
-
-    // Create image
+    let (img_w, img_h) = (ncells_x * 64, ncells_y * 64);
     let mut im = RgbImage::new(img_w, img_h);
+
+    println!("Extracting {}x{} cells to a {}x{} image", ncells_x, ncells_y, img_w, img_h);
 
     // Dump colors
     for object in plugin.objects_of_type::<Landscape>() {
         let (cell_x, cell_y) = object.grid;
         let data = &object.vertex_colors.data;
 
-        for j in 0..(PPC as usize) {
-            for i in 0..(PPC as usize) {
-                let (r, g, b) = (data[j][i][0], data[j][i][1], data[j][i][2]);
-                let pixel_x = ((cell_x - e.min_x) as u32) * PPC + (i as u32);
-                let pixel_y = ((cell_y - e.min_y) as u32) * PPC + (j as u32);
+        // NOTE: skips the first row/column, they are duplicates of the second ones
+        for texel_y in 1..65 {
+            for texel_x in 1..65 {
+                let (r, g, b) = (
+                    data[texel_y][texel_x][0],
+                    data[texel_y][texel_x][1],
+                    data[texel_y][texel_x][2],
+                );
+                let pixel_x = ((cell_x - e.min_x) as u32) * 64 + ((texel_x - 1) as u32);
+                let pixel_y = ((cell_y - e.min_y) as u32) * 64 + ((texel_y - 1) as u32);
                 im.put_pixel(pixel_x, (img_h - 1) - pixel_y, Rgb([r, g, b]));
             }
         }
@@ -89,22 +89,25 @@ fn import(input_esm: &String, input_image: &String, output_esm: &String) -> std:
     let im = image::open(input_image).unwrap().into_rgb8();
     let (img_w, img_h) = im.dimensions();
 
-    assert!(img_w == ncells_x * PPC);
-    assert!(img_h == ncells_y * PPC);
+    println!("Importing {}x{} cells from a {}x{} image", ncells_x, ncells_y, img_w, img_h);
+
+    assert!(img_w == ncells_x * 64);
+    assert!(img_h == ncells_y * 64);
 
     // Read colors
     for object in plugin.objects_of_type_mut::<Landscape>() {
         let (cell_x, cell_y) = object.grid;
         let data = &mut object.vertex_colors.data;
 
-        for j in 0..(PPC as usize) {
-            for i in 0..(PPC as usize) {
-                let pixel_x = ((cell_x - e.min_x) as u32) * PPC + (i as u32);
-                let pixel_y = ((cell_y - e.min_y) as u32) * PPC + (j as u32);
+        // NOTE: doesn't write the first row/column, they are not used by the engine (?)
+        for texel_y in 1..65 {
+            for texel_x in 1..65 {
+                let pixel_x = ((cell_x - e.min_x) as u32) * 64 + ((texel_x - 1) as u32);
+                let pixel_y = ((cell_y - e.min_y) as u32) * 64 + ((texel_y - 1) as u32);
                 let pixel = im.get_pixel(pixel_x, (img_h - 1) - pixel_y);
-                data[j][i][0] = pixel[0];
-                data[j][i][1] = pixel[1];
-                data[j][i][2] = pixel[2];
+                data[texel_y][texel_x][0] = pixel[0];
+                data[texel_y][texel_x][1] = pixel[1];
+                data[texel_y][texel_x][2] = pixel[2];
             }
         }
     }
