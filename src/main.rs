@@ -123,28 +123,17 @@ fn import(input_esm: &String, input_image: &String, output_esm: &String) {
 
         //println!("Processing cell ({cell_x}, {cell_y})");
 
-        if full_dump {
+        // Index of the first row/col to be imported
+        let ppc = if full_dump { 65 } else { 64 };
+        let first = if full_dump { 0 } else { 1 };
 
-            for texel_y in 0..65 {
-                for texel_x in 0..65 {
-                    let pixel_y = (cell_y - e.min_y) * 65 + texel_y;
-                    let pixel_x = (cell_x - e.min_x) * 65 + texel_x;
-                    let pixel = *im.get_pixel(pixel_x as u32, (max_pixel_y - pixel_y) as u32);
-                    data[texel_y as usize][texel_x as usize] = [pixel[0], pixel[1], pixel[2]];
-                }
+        for texel_y in 0..65 {
+            for texel_x in 0..65 {
+                let pixel_y = (cell_y - e.min_y) * ppc + (texel_y - first);
+                let pixel_x = (cell_x - e.min_x) * ppc + (texel_x - first);
+                let pixel = im.get_pixel_checked(pixel_x as u32, (max_pixel_y - pixel_y) as u32).unwrap_or(&white);
+                data[texel_y as usize][texel_x as usize] = [pixel[0], pixel[1], pixel[2]];
             }
-
-        } else {
-
-            for texel_y in 0..65 {
-                for texel_x in 0..65 {
-                    let pixel_x = (cell_x - e.min_x) * 64 + (texel_x - 1);
-                    let pixel_y = (cell_y - e.min_y) * 64 + (texel_y - 1);
-                    let pixel = im.get_pixel_checked(pixel_x as u32, (max_pixel_y - pixel_y) as u32).unwrap_or(&white);
-                    data[texel_y as usize][texel_x as usize] = [pixel[0], pixel[1], pixel[2]];
-                }
-            }
-
         }
 
         // TODO: if all white (including borders), don't import
