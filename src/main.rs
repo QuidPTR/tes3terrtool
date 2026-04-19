@@ -1,33 +1,23 @@
 use clap::{Parser, Subcommand};
 use image::{Rgb, RgbImage};
-use tes3::esp::{Plugin, Landscape, LandscapeFlags};
+use tes3::esp::{Plugin, Landscape, LandscapeFlags, ObjectFlags};
 
 
-struct Extents {
-    pub min_x: i32,
-    pub max_x: i32,
-    pub min_y: i32,
-    pub max_y: i32,
-}
+fn calc_extents(grids: &Vec<(i32, i32)>) -> (i32, i32, i32, i32) {
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_y = i32::MAX;
+    let mut max_y = i32::MIN;
 
-
-fn calc_plugin_extents(plugin: &Plugin) -> Extents {
-    let mut e = Extents {
-        min_x: i32::MAX,
-        max_x: i32::MIN,
-        min_y: i32::MAX,
-        max_y: i32::MIN
-    };
-
-    for object in plugin.objects_of_type::<Landscape>() {
-        let (cell_x, cell_y) = object.grid;
-        e.min_x = e.min_x.min(cell_x);
-        e.max_x = e.max_x.max(cell_x);
-        e.min_y = e.min_y.min(cell_y);
-        e.max_y = e.max_y.max(cell_y);
+    for grid in grids {
+        let (cell_x, cell_y) = grid;
+        min_x = min_x.min(*cell_x);
+        max_x = max_x.max(*cell_x);
+        min_y = min_y.min(*cell_y);
+        max_y = max_y.max(*cell_y);
     }
 
-    e
+    (min_x, max_x, min_y, max_y)
 }
 
 
@@ -37,37 +27,50 @@ fn export(input_esm: &String, output_image: &String, full_dump: bool) {
         Plugin::from_path(input_esm)
             .expect(format!("ERROR: could not open plugin '{input_esm}'").as_str());
 
-    let e = calc_plugin_extents(&plugin);
-    let ncells_x: u32 = (e.max_x - e.min_x + 1) as u32;
-    let ncells_y: u32 = (e.max_y - e.min_y + 1) as u32;
+    // Retrieve all suitable landscape records
+    let landscapes: Vec<_> = {
+        plugin.objects_of_type::<Landscape>()
+            .filter(|landscape| { 
+                if landscape.flags.contains(ObjectFlags::DELETED) {
+                    // Don't export deleted cells
+                    return false;
+                }
+                if !landscape
+                    .landscape_flags
+                    .contains(LandscapeFlags::USES_VERTEX_COLORS) {
+                    // Don't export cells without vertex colors
+                    return false;
+                }
+                true
+            })
+            .collect()
+    };
 
-    // Pixels per cell
+    // Figure out the extents of the plugin
+    let cell_coords: Vec<_> = {
+        landscapes.iter().map(|landscape| { landscape.grid }).collect()
+    };
+    let (min_x, max_x, min_y, max_y) = calc_extents(&cell_coords);
+    let ncells_x: u32 = (max_x - min_x + 1) as u32;
+    let ncells_y: u32 = (max_y - min_y + 1) as u32;
+
+    // Setup pixels per cell and index of the first texel to be exported
     let ppc = if full_dump { 65 } else { 64 };
+    let first = if full_dump { 0 } else { 1 };
+
+    // Create a new white image
     let (img_w, img_h) = (ncells_x * ppc, ncells_y * ppc);
     let mut im = RgbImage::new(img_w, img_h);
+    im.fill(0xFFu8);
 
     println!("Extracting {ncells_x}x{ncells_y} cells to a {img_w}x{img_w} image");
-    println!("Origin cell has coordinates ({}, {})", e.min_x, e.min_y);
+    println!("Origin cell has coordinates ({}, {})", min_x, min_y);
 
-    // Fill in with white, useful during import
-    im.fill(0xFF);
+    // Export colors
+    for landscape in landscapes {
+        let (cell_x, cell_y) = landscape.grid;
+        let data = &landscape.vertex_colors.data;
 
-    // Dump colors
-    for object in plugin.objects_of_type::<Landscape>() {
-        let (cell_x, cell_y) = object.grid;
-        let data = &object.vertex_colors.data;
-
-        if !(object.landscape_flags.intersects(LandscapeFlags::USES_VERTEX_COLORS)) {
-            // No vertex color to process
-            continue;
-        }
-
-        //println!("Processing cell ({cell_x}, {cell_y})");
-
-        // Index of the first row/col to be exported
-        let first = if full_dump { 0 } else { 1 };
-
-        // NOTE: skips the first row/column, they cannot be edited independently
         for texel_y in first..65 {
             for texel_x in first..65 {
                 let (r, g, b) = (
@@ -75,8 +78,8 @@ fn export(input_esm: &String, output_image: &String, full_dump: bool) {
                     data[texel_y][texel_x][1],
                     data[texel_y][texel_x][2],
                 );
-                let pixel_x = ((cell_x - e.min_x) as u32) * ppc + ((texel_x - first) as u32);
-                let pixel_y = ((cell_y - e.min_y) as u32) * ppc + ((texel_y - first) as u32);
+                let pixel_x = ((cell_x - min_x) as u32) * ppc + ((texel_x - first) as u32);
+                let pixel_y = ((cell_y - min_y) as u32) * ppc + ((texel_y - first) as u32);
                 im.put_pixel(pixel_x, (img_h - 1) - pixel_y, Rgb([r, g, b]));
             }
         }
@@ -87,59 +90,79 @@ fn export(input_esm: &String, output_image: &String, full_dump: bool) {
 }
 
 
+fn is_full_dump(img_w: u32, img_h: u32, ncells_x: u32, ncells_y: u32) -> bool {
+    if img_w == ncells_x * 64 && img_h == ncells_y * 64 {
+        return false;
+    } else if img_w == ncells_x * 65 && img_h == ncells_y * 65 {
+        return true;
+    } else {
+        panic!("Image size doesn't match plugin size");
+    };
+}
+
+
 fn import(input_esm: &String, input_image: &String, output_esm: &String) {
 
     let mut plugin =
         Plugin::from_path(input_esm)
             .expect(format!("ERROR: could not open plugin '{input_esm}'").as_str());
 
-    let e = calc_plugin_extents(&plugin);
-    let ncells_x: u32 = (e.max_x - e.min_x + 1) as u32;
-    let ncells_y: u32 = (e.max_y - e.min_y + 1) as u32;
+    // Retrieve all suitable landscape records
+    let landscapes: Vec<_> = {
+        plugin.objects_of_type_mut::<Landscape>()
+            .filter(|landscape| { 
+                if landscape.flags.contains(ObjectFlags::DELETED) {
+                    // Don't import deleted cells
+                    return false;
+                }
+                if !landscape
+                    .landscape_flags
+                    .contains(LandscapeFlags::USES_VERTEX_COLORS) {
+                    // Don't import cells without vertex colors
+                    return false;
+                }
+                true
+            })
+            .collect()
+    };
+
+    // Figure out the extents of the plugin
+    let cell_coords: Vec<_> = {
+        landscapes.iter().map(|landscape| { landscape.grid }).collect()
+    };
+    let (min_x, max_x, min_y, max_y) = calc_extents(&cell_coords);
+    let ncells_x: u32 = (max_x - min_x + 1) as u32;
+    let ncells_y: u32 = (max_y - min_y + 1) as u32;
 
     let im =
         image::open(input_image)
             .expect(format!("ERROR: could not open image '{input_image}'").as_str())
             .into_rgb8();
     let (img_w, img_h) = im.dimensions();
-
-    let full_dump = if img_w == ncells_x * 64 && img_h == ncells_y * 64 {
-        false
-    } else if img_w == ncells_x * 65 && img_h == ncells_y * 65 {
-        true
-    } else {
-        panic!("Image size doesn't match plugin size");
-    };
+    let full_dump: bool = is_full_dump(img_w, img_h, ncells_x, ncells_y);
 
     println!("Importing {ncells_x}x{ncells_y} cells from a {img_w}x{img_h} image (full dump: {full_dump})");
 
+    // Setup pixels per cell and index of the first texel to be imported
+    let ppc = if full_dump { 65 } else { 64 };
+    let first = if full_dump { 0 } else { 1 };
     let max_pixel_y: i32 = (img_h - 1) as i32;
     let white = Rgb([0xFFu8, 0xFFu8, 0xFFu8]);
 
-    // Read colors
-    for object in plugin.objects_of_type_mut::<Landscape>() {
-        let (cell_x, cell_y) = object.grid;
-        let data = &mut object.vertex_colors.data;
-
-        //println!("Processing cell ({cell_x}, {cell_y})");
-
-        // Index of the first row/col to be imported
-        let ppc = if full_dump { 65 } else { 64 };
-        let first = if full_dump { 0 } else { 1 };
+    // Import colors
+    for landscape in landscapes {
+        let (cell_x, cell_y) = landscape.grid;
+        let data = &mut landscape.vertex_colors.data;
 
         for texel_y in 0..65 {
             for texel_x in 0..65 {
-                let pixel_y = (cell_y - e.min_y) * ppc + (texel_y - first);
-                let pixel_x = (cell_x - e.min_x) * ppc + (texel_x - first);
+                let pixel_y = (cell_y - min_y) * ppc + (texel_y - first);
+                let pixel_x = (cell_x - min_x) * ppc + (texel_x - first);
                 let pixel = im.get_pixel_checked(pixel_x as u32, (max_pixel_y - pixel_y) as u32).unwrap_or(&white);
                 data[texel_y as usize][texel_x as usize] = [pixel[0], pixel[1], pixel[2]];
             }
         }
 
-        // TODO: if all white (including borders), don't import
-
-        // Ensure the game knows this cell now has vertex colors
-        object.landscape_flags |= LandscapeFlags::USES_VERTEX_COLORS;
     }
 
     // Save the ESM/ESP
