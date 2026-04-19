@@ -31,6 +31,21 @@ Importing:
 tes3terrtool import-vcol --input-esm Morrowind.esm --input-image Morrowind-vcol-edited.bmp --output-esm Morrowind-edited.ems
 ```
 
+# Installation
+
+Download and unzip the code.  Then run:
+
+```sh
+cargo build
+```
+
+The executable will be placed in `targets/debug`.  Alternatively, you can run
+the tool as, e.g.:
+
+```sh
+cargo run -- export-vcol <all other arguments go here>
+```
+
 
 # Caveats
 
