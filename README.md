@@ -28,23 +28,12 @@ tes3terrtool export-vcol --input-esm Morrowind.esm --output-image Morrowind-vcol
 Importing:
 
 ```sh
-tes3terrtool import-vcol --input-esm Morrowind.esm --input-image Morrowind-vcol-edited.bmp --output-esm Morrowind-edited.ems
+tes3terrtool import-vcol --input-esm Morrowind.esm --input-image Morrowind-vcol-edited.bmp --output-esm Morrowind-edited.esm
 ```
 
 # Installation
 
-Download and unzip the code.  Then run:
-
-```sh
-cargo build
-```
-
-The executable will be placed in `targets/debug`.  Alternatively, you can run
-the tool as, e.g.:
-
-```sh
-cargo run -- export-vcol <all other arguments go here>
-```
+Downloads are available from the [Releases](https://github.com/QuidPTR/tes3terrtool/releases/) page.
 
 
 # Caveats
